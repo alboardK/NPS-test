@@ -15,6 +15,8 @@ st.set_page_config(page_title="Annette K. - Dashboard NPS", layout="wide")
 def load_data():
     # Chargement direct du CSV
     df = pd.read_csv("data/NPS ANNETTE K. Sauvegarde - anonymes.csv")
+    # Afficher les noms des colonnes pour debug
+    st.write("Colonnes disponibles:", df.columns.tolist())
     # Conversion de l'horodateur en datetime
     df['Horodateur'] = pd.to_datetime(df['Horodateur'], format='%d/%m/%Y %H:%M:%S')
     return df
@@ -36,15 +38,22 @@ def calculate_nps(scores):
 # Header
 st.title("🏊‍♂️ Annette K. - Dashboard NPS et Satisfaction")
 
+# Pour debugger, affichons les premières lignes du DataFrame
+st.write("Aperçu des données:", df.head())
+
+# Trouver la colonne NPS (elle peut avoir un nom légèrement différent)
+nps_column = [col for col in df.columns if 'Recommandation' in col][0]
+retention_column = [col for col in df.columns if 'probabilité' in col][0]
+
 # Métriques principales
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    nps_score = calculate_nps(df['Recommandation\nSur une échelle de 1 à 10'].dropna())
+    nps_score = calculate_nps(df[nps_column].dropna())
     st.metric("NPS Score", f"{nps_score:.1f}%")
 
 with col2:
-    retention_score = df['Sur une échelle de 1 à 10, \nQuelle est la probabilité que vous soyez toujours abonné chez Annette K. dans 6 mois ?'].mean()
+    retention_score = df[retention_column].mean()
     st.metric("Score de Rétention Moyen", f"{retention_score:.1f}/10")
 
 with col3:
@@ -55,15 +64,15 @@ with col3:
 st.subheader("Évolution du NPS dans le temps")
 df['Month'] = df['Horodateur'].dt.to_period('M')
 monthly_nps = df.groupby('Month').agg({
-    'Recommandation\nSur une échelle de 1 à 10': lambda x: calculate_nps(x)
+    nps_column: lambda x: calculate_nps(x)
 }).reset_index()
 monthly_nps['Month'] = monthly_nps['Month'].astype(str)
 
 fig_nps = px.line(monthly_nps, 
                   x='Month', 
-                  y='Recommandation\nSur une échelle de 1 à 10',
+                  y=nps_column,
                   title="Évolution mensuelle du NPS",
-                  labels={'Recommandation\nSur une échelle de 1 à 10': 'NPS Score (%)',
+                  labels={nps_column: 'NPS Score (%)',
                          'Month': 'Mois'})
 st.plotly_chart(fig_nps, use_container_width=True)
 
@@ -77,7 +86,7 @@ def get_nps_category(score):
     else:
         return 'Neutres'
 
-df['NPS_Category'] = df['Recommandation\nSur une échelle de 1 à 10'].apply(get_nps_category)
+df['NPS_Category'] = df[nps_column].apply(get_nps_category)
 monthly_volumes = df.groupby(['Month', 'NPS_Category']).size().reset_index(name='count')
 
 fig_volumes = px.bar(monthly_volumes,
@@ -120,6 +129,7 @@ st.plotly_chart(fig_satisfaction, use_container_width=True)
 
 # Analyse des commentaires
 st.subheader("Analyse des suggestions d'amélioration")
+comments_column = "Si vous étiez manager chez Annette K, Quelles améliorations proposeriez vous ?"
 
 # Fonction pour nettoyer le texte
 def clean_text(text):
@@ -127,7 +137,7 @@ def clean_text(text):
         return text.lower().strip()
     return ""
 
-comments = df["Si vous étiez manager chez Annette K, Quelles améliorations proposeriez vous ?"].dropna()
+comments = df[comments_column].dropna()
 comments_text = " ".join(comments.apply(clean_text))
 
 wordcloud = WordCloud(width=800, height=400, background_color='white', colormap='viridis').generate(comments_text)
@@ -140,7 +150,7 @@ st.pyplot(plt)
 # Section filtrable pour voir les commentaires bruts
 st.subheader("Commentaires détaillés")
 if st.checkbox("Afficher tous les commentaires"):
-    st.dataframe(df[["Horodateur", "Si vous étiez manager chez Annette K, Quelles améliorations proposeriez vous ?"]].dropna())
+    st.dataframe(df[["Horodateur", comments_column]].dropna())
 
 # Footer avec dernière mise à jour
 st.markdown("---")
