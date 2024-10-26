@@ -1,0 +1,6 @@
+# Créez un fichier .gitignore
+echo ".env
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+.DS_Store" > .gitignore
