@@ -4,8 +4,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
-from textblob import TextBlob
-import re
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 
@@ -15,14 +13,18 @@ st.set_page_config(page_title="Annette K. - Dashboard NPS", layout="wide")
 # Fonction pour charger les données
 @st.cache_data
 def load_data():
-    # Dans un cas réel, on utiliserait l'API Google Sheets ici
-    # Pour l'exemple, on va charger directement le CSV
-    df = pd.read_csv("NPS ANNETTE K. Sauvegarde - anonymes.csv")
+    # Chargement direct du CSV
+    df = pd.read_csv("data/NPS ANNETTE K. Sauvegarde - anonymes.csv")
+    # Conversion de l'horodateur en datetime
     df['Horodateur'] = pd.to_datetime(df['Horodateur'], format='%d/%m/%Y %H:%M:%S')
     return df
 
 # Chargement des données
-df = load_data()
+try:
+    df = load_data()
+except Exception as e:
+    st.error(f"Erreur lors du chargement des données: {str(e)}")
+    st.stop()
 
 # Fonction pour calculer le NPS
 def calculate_nps(scores):
@@ -65,18 +67,40 @@ fig_nps = px.line(monthly_nps,
                          'Month': 'Mois'})
 st.plotly_chart(fig_nps, use_container_width=True)
 
+# Ajout du graphique des volumes promoteurs/neutres/détracteurs
+st.subheader("Répartition mensuelle des répondants")
+def get_nps_category(score):
+    if score >= 9:
+        return 'Promoteurs'
+    elif score <= 6:
+        return 'Détracteurs'
+    else:
+        return 'Neutres'
+
+df['NPS_Category'] = df['Recommandation\nSur une échelle de 1 à 10'].apply(get_nps_category)
+monthly_volumes = df.groupby(['Month', 'NPS_Category']).size().reset_index(name='count')
+
+fig_volumes = px.bar(monthly_volumes,
+                    x='Month',
+                    y='count',
+                    color='NPS_Category',
+                    title="Répartition mensuelle des répondants",
+                    labels={'count': 'Nombre de répondants',
+                           'Month': 'Mois',
+                           'NPS_Category': 'Catégorie'},
+                    category_orders={'NPS_Category': ['Détracteurs', 'Neutres', 'Promoteurs']},
+                    color_discrete_map={'Promoteurs': '#00CC96',
+                                      'Neutres': '#FFA15A',
+                                      'Détracteurs': '#EF553B'})
+st.plotly_chart(fig_volumes, use_container_width=True)
+
 # Satisfaction par catégorie
 st.subheader("Satisfaction par catégorie")
-
-# Sélection des colonnes de satisfaction (échelle 1-5)
 satisfaction_cols = [col for col in df.columns if "sur une echelle de 1 à 5" in col.lower()]
 satisfaction_data = df[satisfaction_cols]
-
-# Nettoyage des noms de colonnes pour l'affichage
 clean_names = [col.split("notez votre satisfaction concernant ")[-1].strip() for col in satisfaction_cols]
 satisfaction_means = satisfaction_data.mean()
 
-# Création du graphique en barres horizontales
 fig_satisfaction = go.Figure(go.Bar(
     y=clean_names,
     x=satisfaction_means,
@@ -103,14 +127,11 @@ def clean_text(text):
         return text.lower().strip()
     return ""
 
-# Agrégation des commentaires
 comments = df["Si vous étiez manager chez Annette K, Quelles améliorations proposeriez vous ?"].dropna()
 comments_text = " ".join(comments.apply(clean_text))
 
-# Création du nuage de mots
 wordcloud = WordCloud(width=800, height=400, background_color='white', colormap='viridis').generate(comments_text)
 
-# Affichage du nuage de mots
 plt.figure(figsize=(10,5))
 plt.imshow(wordcloud, interpolation='bilinear')
 plt.axis('off')
@@ -124,4 +145,3 @@ if st.checkbox("Afficher tous les commentaires"):
 # Footer avec dernière mise à jour
 st.markdown("---")
 st.markdown(f"*Dernière mise à jour: {datetime.now().strftime('%d/%m/%Y %H:%M')}*")
-
