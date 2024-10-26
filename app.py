@@ -17,6 +17,8 @@ def load_data():
     df = pd.read_csv("data/NPS ANNETTE K. Sauvegarde - anonymes.csv")
     # Conversion de l'horodateur en datetime
     df['Horodateur'] = pd.to_datetime(df['Horodateur'], format='%d/%m/%Y %H:%M:%S')
+    # Création d'une colonne month plus simple
+    df['Month'] = df['Horodateur'].dt.strftime('%Y-%m')
     return df
 
 # Chargement des données
@@ -36,15 +38,19 @@ def calculate_nps(scores):
 # Header
 st.title("🏊‍♂️ Annette K. - Dashboard NPS et Satisfaction")
 
+# Trouver la colonne NPS (elle peut avoir un nom légèrement différent)
+nps_column = [col for col in df.columns if 'Recommandation' in col][0]
+retention_column = [col for col in df.columns if 'probabilité' in col][0]
+
 # Métriques principales
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    nps_score = calculate_nps(df['Recommandation\nSur une échelle de 1 à 10'].dropna())
+    nps_score = calculate_nps(df[nps_column].dropna())
     st.metric("NPS Score", f"{nps_score:.1f}%")
 
 with col2:
-    retention_score = df['Sur une échelle de 1 à 10, \nQuelle est la probabilité que vous soyez toujours abonné chez Annette K. dans 6 mois ?'].mean()
+    retention_score = df[retention_column].mean()
     st.metric("Score de Rétention Moyen", f"{retention_score:.1f}/10")
 
 with col3:
@@ -53,23 +59,24 @@ with col3:
 
 # Évolution du NPS dans le temps
 st.subheader("Évolution du NPS dans le temps")
-df['Month'] = df['Horodateur'].dt.to_period('M')
-monthly_nps = df.groupby('Month').agg({
-    'Recommandation\nSur une échelle de 1 à 10': lambda x: calculate_nps(x)
-}).reset_index()
-monthly_nps['Month'] = monthly_nps['Month'].astype(str)
+monthly_nps = df.groupby('Month').apply(
+    lambda x: calculate_nps(x[nps_column].dropna())
+).reset_index()
+monthly_nps.columns = ['Month', 'NPS']
 
 fig_nps = px.line(monthly_nps, 
                   x='Month', 
-                  y='Recommandation\nSur une échelle de 1 à 10',
+                  y='NPS',
                   title="Évolution mensuelle du NPS",
-                  labels={'Recommandation\nSur une échelle de 1 à 10': 'NPS Score (%)',
+                  labels={'NPS': 'NPS Score (%)',
                          'Month': 'Mois'})
 st.plotly_chart(fig_nps, use_container_width=True)
 
 # Ajout du graphique des volumes promoteurs/neutres/détracteurs
 st.subheader("Répartition mensuelle des répondants")
 def get_nps_category(score):
+    if pd.isna(score):
+        return 'Non renseigné'
     if score >= 9:
         return 'Promoteurs'
     elif score <= 6:
@@ -77,9 +84,13 @@ def get_nps_category(score):
     else:
         return 'Neutres'
 
-df['NPS_Category'] = df['Recommandation\nSur une échelle de 1 à 10'].apply(get_nps_category)
-monthly_volumes = df.groupby(['Month', 'NPS_Category']).size().reset_index(name='count')
+df['NPS_Category'] = df[nps_column].apply(get_nps_category)
 
+# Calcul des volumes mensuels
+monthly_volumes = pd.DataFrame(df.groupby(['Month', 'NPS_Category']).size()).reset_index()
+monthly_volumes.columns = ['Month', 'NPS_Category', 'count']
+
+# Création du graphique
 fig_volumes = px.bar(monthly_volumes,
                     x='Month',
                     y='count',
@@ -92,15 +103,26 @@ fig_volumes = px.bar(monthly_volumes,
                     color_discrete_map={'Promoteurs': '#00CC96',
                                       'Neutres': '#FFA15A',
                                       'Détracteurs': '#EF553B'})
+
+# Mise à jour du layout
+fig_volumes.update_layout(barmode='stack')
 st.plotly_chart(fig_volumes, use_container_width=True)
 
 # Satisfaction par catégorie
 st.subheader("Satisfaction par catégorie")
 satisfaction_cols = [col for col in df.columns if "sur une echelle de 1 à 5" in col.lower()]
 satisfaction_data = df[satisfaction_cols]
-clean_names = [col.split("notez votre satisfaction concernant ")[-1].strip() for col in satisfaction_cols]
+
+# Nettoyer les noms pour l'affichage
+clean_names = []
+for col in satisfaction_cols:
+    name = col.lower()
+    name = name.replace("sur une echelle de 1 à 5, 1 etant la pire note et 5 la meilleure, notez votre satisfaction concernant ", "")
+    clean_names.append(name.strip())
+
 satisfaction_means = satisfaction_data.mean()
 
+# Création du graphique de satisfaction
 fig_satisfaction = go.Figure(go.Bar(
     y=clean_names,
     x=satisfaction_means,
@@ -120,27 +142,31 @@ st.plotly_chart(fig_satisfaction, use_container_width=True)
 
 # Analyse des commentaires
 st.subheader("Analyse des suggestions d'amélioration")
+comments_column = "Si vous étiez manager chez Annette K, Quelles améliorations proposeriez vous ?"
 
-# Fonction pour nettoyer le texte
 def clean_text(text):
     if isinstance(text, str):
         return text.lower().strip()
     return ""
 
-comments = df["Si vous étiez manager chez Annette K, Quelles améliorations proposeriez vous ?"].dropna()
-comments_text = " ".join(comments.apply(clean_text))
+comments = df[comments_column].dropna()
+if len(comments) > 0:
+    comments_text = " ".join(comments.apply(clean_text))
+    
+    if comments_text.strip():
+        wordcloud = WordCloud(width=800, height=400, 
+                            background_color='white', 
+                            colormap='viridis').generate(comments_text)
 
-wordcloud = WordCloud(width=800, height=400, background_color='white', colormap='viridis').generate(comments_text)
-
-plt.figure(figsize=(10,5))
-plt.imshow(wordcloud, interpolation='bilinear')
-plt.axis('off')
-st.pyplot(plt)
+        plt.figure(figsize=(10,5))
+        plt.imshow(wordcloud, interpolation='bilinear')
+        plt.axis('off')
+        st.pyplot(plt)
 
 # Section filtrable pour voir les commentaires bruts
 st.subheader("Commentaires détaillés")
 if st.checkbox("Afficher tous les commentaires"):
-    st.dataframe(df[["Horodateur", "Si vous étiez manager chez Annette K, Quelles améliorations proposeriez vous ?"]].dropna())
+    st.dataframe(df[["Horodateur", comments_column]].dropna())
 
 # Footer avec dernière mise à jour
 st.markdown("---")
